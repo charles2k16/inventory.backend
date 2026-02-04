@@ -77,23 +77,24 @@ model WeeklyStockReport {
 
 // Sales transactions
 model Sale {
-  id            String   @id @default(uuid())
-  saleNumber    String   @unique
-  productId     String
-  product       Product  @relation(fields: [productId], references: [id])
-  quantity      Int
-  unitPrice     Decimal  @db.Decimal(10, 2)
-  totalAmount   Decimal  @db.Decimal(12, 2)
-  customerId    String?
-  customerName  String?
-  paymentMethod String   @default("CASH") // "CASH", "CREDIT", "MOBILE_MONEY"
-  paymentStatus String   @default("PAID") // "PAID", "PENDING", "PARTIAL"
-  amountPaid    Decimal  @db.Decimal(12, 2)
-  amountDue     Decimal  @default(0) @db.Decimal(12, 2)
-  soldBy        String?
-  notes         String?
-  saleDate      DateTime @default(now())
-  createdAt     DateTime @default(now())
+  id              String   @id @default(uuid())
+  saleNumber      String   @unique
+  bulkOrderNumber String? // Links related sales from bulk operations
+  productId       String
+  product         Product  @relation(fields: [productId], references: [id])
+  quantity        Int
+  unitPrice       Decimal  @db.Decimal(10, 2)
+  totalAmount     Decimal  @db.Decimal(12, 2)
+  customerId      String?
+  customerName    String?
+  paymentMethod   String   @default("CASH") // "CASH", "CREDIT", "MOBILE_MONEY"
+  paymentStatus   String   @default("PAID") // "PAID", "PENDING", "PARTIAL"
+  amountPaid      Decimal  @db.Decimal(12, 2)
+  amountDue       Decimal  @default(0) @db.Decimal(12, 2)
+  soldBy          String?
+  notes           String?
+  saleDate        DateTime @default(now())
+  createdAt       DateTime @default(now())
 
   // Relations
   lender  Lender?  @relation(fields: [customerId], references: [id])
@@ -103,6 +104,7 @@ model Sale {
   @@index([customerId])
   @@index([saleDate])
   @@index([paymentStatus])
+  @@index([bulkOrderNumber])
 }
 
 // Returns/Refunds

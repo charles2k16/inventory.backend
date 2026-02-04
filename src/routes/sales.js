@@ -5,6 +5,7 @@ const router = express.Router();
 
 router.get('/', salesController.getAllSales);
 router.get('/summary', salesController.getSalesSummary);
+router.post('/bulk', salesController.createBulkSale);
 router.get('/:id', salesController.getSale);
 router.post('/', salesController.createSale);
 router.patch('/:id/payment', salesController.updatePayment);

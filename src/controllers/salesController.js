@@ -6,14 +6,7 @@ export const salesController = {
   // Get all sales
   async getAllSales(req, res, next) {
     try {
-      const { 
-        startDate, 
-        endDate, 
-        status, 
-        customerId,
-        page = 1, 
-        limit = 50 
-      } = req.query;
+      const { startDate, endDate, status, customerId, page = 1, limit = 50 } = req.query;
 
       const where = {};
 
@@ -37,10 +30,10 @@ export const salesController = {
           include: {
             product: true,
             lender: true,
-            returns: true
-          }
+            returns: true,
+          },
         }),
-        prisma.sale.count({ where })
+        prisma.sale.count({ where }),
       ]);
 
       res.json({
@@ -49,8 +42,8 @@ export const salesController = {
           total,
           page: parseInt(page),
           limit: parseInt(limit),
-          pages: Math.ceil(total / parseInt(limit))
-        }
+          pages: Math.ceil(total / parseInt(limit)),
+        },
       });
     } catch (error) {
       next(error);
@@ -67,8 +60,8 @@ export const salesController = {
         include: {
           product: true,
           lender: true,
-          returns: true
-        }
+          returns: true,
+        },
       });
 
       if (!sale) {
@@ -93,7 +86,7 @@ export const salesController = {
         paymentMethod,
         paymentStatus,
         amountPaid,
-        notes
+        notes,
       } = req.body;
 
       // Calculate totals
@@ -102,12 +95,12 @@ export const salesController = {
 
       // Generate sale number
       const lastSale = await prisma.sale.findFirst({
-        orderBy: { createdAt: 'desc' }
+        orderBy: { createdAt: 'desc' },
       });
       const saleNumber = `SALE-${Date.now()}`;
 
       // Start transaction
-      const result = await prisma.$transaction(async (tx) => {
+      const result = await prisma.$transaction(async tx => {
         // Create sale
         const sale = await tx.sale.create({
           data: {
@@ -123,12 +116,12 @@ export const salesController = {
             amountPaid: amountPaid || 0,
             amountDue,
             soldBy: req.user.id,
-            notes
+            notes,
           },
           include: {
             product: true,
-            lender: true
-          }
+            lender: true,
+          },
         });
 
         // Update product stock
@@ -136,9 +129,9 @@ export const salesController = {
           where: { id: productId },
           data: {
             currentStock: {
-              decrement: parseInt(quantity)
-            }
-          }
+              decrement: parseInt(quantity),
+            },
+          },
         });
 
         // Record stock movement
@@ -149,8 +142,8 @@ export const salesController = {
             quantity: -parseInt(quantity),
             reason: 'SALE',
             reference: sale.id,
-            createdBy: req.user.id
-          }
+            createdBy: req.user.id,
+          },
         });
 
         // Update lender if credit sale
@@ -159,8 +152,8 @@ export const salesController = {
             where: { id: customerId },
             data: {
               currentDebt: { increment: amountDue },
-              totalPurchased: { increment: totalAmount }
-            }
+              totalPurchased: { increment: totalAmount },
+            },
           });
         }
 
@@ -188,7 +181,7 @@ export const salesController = {
       const newAmountDue = parseFloat(sale.totalAmount) - newAmountPaid;
       const paymentStatus = newAmountDue <= 0 ? 'PAID' : 'PARTIAL';
 
-      const result = await prisma.$transaction(async (tx) => {
+      const result = await prisma.$transaction(async tx => {
         // Update sale
         const updatedSale = await tx.sale.update({
           where: { id },
@@ -196,8 +189,8 @@ export const salesController = {
             amountPaid: newAmountPaid,
             amountDue: newAmountDue,
             paymentStatus,
-            paymentMethod
-          }
+            paymentMethod,
+          },
         });
 
         // Update lender debt if applicable
@@ -206,8 +199,8 @@ export const salesController = {
             where: { id: sale.customerId },
             data: {
               currentDebt: { decrement: parseFloat(amountPaid) },
-              totalPaid: { increment: parseFloat(amountPaid) }
-            }
+              totalPaid: { increment: parseFloat(amountPaid) },
+            },
           });
 
           // Record payment
@@ -219,8 +212,8 @@ export const salesController = {
               amount: parseFloat(amountPaid),
               paymentMethod,
               reference: sale.saleNumber,
-              receivedBy: req.user.id
-            }
+              receivedBy: req.user.id,
+            },
           });
         }
 
@@ -228,6 +221,121 @@ export const salesController = {
       });
 
       res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Create bulk sale
+  async createBulkSale(req, res, next) {
+    try {
+      const { sales, totalAmount } = req.body;
+
+      if (!Array.isArray(sales) || sales.length === 0) {
+        return res.status(400).json({ message: 'Please provide at least one product' });
+      }
+
+      // Generate a unique order number for this bulk sale
+      const orderNumber = `BULK-${Date.now()}`;
+
+      const result = await prisma.$transaction(async tx => {
+        const createdSales = [];
+
+        for (const saleData of sales) {
+          const {
+            productId,
+            quantity,
+            unitPrice,
+            customerId,
+            customerName,
+            paymentMethod,
+            paymentStatus,
+            amountPaid,
+            notes,
+          } = saleData;
+
+          // Calculate totals for this item
+          const itemTotal = parseFloat(quantity) * parseFloat(unitPrice);
+          const itemAmountDue = itemTotal - parseFloat(amountPaid || 0);
+
+          // Generate sale number
+          const saleNumber = `${orderNumber}-${createdSales.length + 1}`;
+
+          // Create sale
+          const sale = await tx.sale.create({
+            data: {
+              saleNumber,
+              productId,
+              quantity: parseInt(quantity),
+              unitPrice,
+              totalAmount: itemTotal,
+              customerId,
+              customerName,
+              paymentMethod,
+              paymentStatus,
+              amountPaid: amountPaid || 0,
+              amountDue: itemAmountDue,
+              soldBy: req.user.id,
+              notes,
+              bulkOrderNumber: orderNumber,
+            },
+            include: {
+              product: true,
+              lender: true,
+            },
+          });
+
+          // Update product stock
+          const product = await tx.product.findUnique({ where: { id: productId } });
+          const quantityBefore = product.currentStock;
+          const quantityAfter = quantityBefore - parseInt(quantity);
+
+          await tx.product.update({
+            where: { id: productId },
+            data: {
+              currentStock: {
+                decrement: parseInt(quantity),
+              },
+            },
+          });
+
+          // Record stock movement with before/after
+          await tx.stockMovement.create({
+            data: {
+              productId,
+              type: 'OUT',
+              quantity: -parseInt(quantity),
+              reason: 'SALE',
+              reference: sale.id,
+              createdBy: req.user.id,
+              quantityBefore,
+              quantityAfter,
+            },
+          });
+
+          // Update lender if credit sale
+          if (customerId && paymentStatus !== 'PAID') {
+            await tx.lender.update({
+              where: { id: customerId },
+              data: {
+                currentDebt: { increment: itemAmountDue },
+                totalPurchased: { increment: itemTotal },
+              },
+            });
+          }
+
+          createdSales.push(sale);
+        }
+
+        return createdSales;
+      });
+
+      res.status(201).json({
+        message: 'Bulk sale created successfully',
+        orderNumber,
+        sales: result,
+        totalSalesCreated: result.length,
+      });
     } catch (error) {
       next(error);
     }
@@ -249,24 +357,24 @@ export const salesController = {
         prisma.sale.count({ where }),
         prisma.sale.aggregate({
           where,
-          _sum: { totalAmount: true }
+          _sum: { totalAmount: true },
         }),
         prisma.sale.aggregate({
-          where: { 
+          where: {
             ...where,
-            paymentStatus: { not: 'PAID' }
+            paymentStatus: { not: 'PAID' },
           },
-          _sum: { amountDue: true }
-        })
+          _sum: { amountDue: true },
+        }),
       ]);
 
       res.json({
         totalSales,
         totalRevenue: totalRevenue._sum.totalAmount || 0,
-        pendingPayments: pendingPayments._sum.amountDue || 0
+        pendingPayments: pendingPayments._sum.amountDue || 0,
       });
     } catch (error) {
       next(error);
     }
-  }
+  },
 };
