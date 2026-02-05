@@ -8,7 +8,7 @@ function getWeekNumber(date) {
   const dayNum = d.getUTCDay() || 7;
   d.setUTCDate(d.getUTCDate() + 4 - dayNum);
   const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  return Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
 }
 
 export const stockReportsController = {
@@ -27,12 +27,9 @@ export const stockReportsController = {
           where,
           skip,
           take: parseInt(limit),
-          orderBy: [
-            { year: 'desc' },
-            { weekNumber: 'desc' }
-          ]
+          orderBy: [{ year: 'desc' }, { weekNumber: 'desc' }],
         }),
-        prisma.weeklyStockReport.count({ where })
+        prisma.weeklyStockReport.count({ where }),
       ]);
 
       res.json({
@@ -41,8 +38,8 @@ export const stockReportsController = {
           total,
           page: parseInt(page),
           limit: parseInt(limit),
-          pages: Math.ceil(total / parseInt(limit))
-        }
+          pages: Math.ceil(total / parseInt(limit)),
+        },
       });
     } catch (error) {
       next(error);
@@ -55,7 +52,7 @@ export const stockReportsController = {
       const { id } = req.params;
 
       const report = await prisma.weeklyStockReport.findUnique({
-        where: { id }
+        where: { id },
       });
 
       if (!report) {
@@ -65,7 +62,7 @@ export const stockReportsController = {
       // Get product details for opening and closing stock
       const productIds = [
         ...Object.keys(report.openingStock),
-        ...Object.keys(report.closingStock)
+        ...Object.keys(report.closingStock),
       ];
       const uniqueProductIds = [...new Set(productIds)];
 
@@ -75,8 +72,8 @@ export const stockReportsController = {
           id: true,
           itemName: true,
           sellingPrice: true,
-          costPrice: true
-        }
+          costPrice: true,
+        },
       });
 
       const productsMap = products.reduce((acc, p) => {
@@ -84,9 +81,33 @@ export const stockReportsController = {
         return acc;
       }, {});
 
+      // Get additional stock for this week
+      const additionalStock = await prisma.additionalStock.findMany({
+        where: {
+          weekNumber: report.weekNumber,
+          year: report.year,
+        },
+        include: {
+          product: {
+            select: {
+              itemName: true,
+              category: true,
+            },
+          },
+        },
+        orderBy: { purchaseDate: 'desc' },
+      });
+
+      const additionalStockValue = additionalStock.reduce(
+        (sum, stock) => sum + parseFloat(stock.totalCost),
+        0,
+      );
+
       res.json({
         ...report,
-        productsMap
+        productsMap,
+        additionalStock,
+        additionalStockValue,
       });
     } catch (error) {
       next(error);
@@ -106,13 +127,13 @@ export const stockReportsController = {
       // Check if report already exists
       const existing = await prisma.weeklyStockReport.findUnique({
         where: {
-          weekNumber_year: { weekNumber, year }
-        }
+          weekNumber_year: { weekNumber, year },
+        },
       });
 
       if (existing) {
-        return res.status(400).json({ 
-          error: 'Report already exists for this week' 
+        return res.status(400).json({
+          error: 'Report already exists for this week',
         });
       }
 
@@ -121,8 +142,8 @@ export const stockReportsController = {
         select: {
           id: true,
           currentStock: true,
-          costPrice: true
-        }
+          costPrice: true,
+        },
       });
 
       // Create opening stock snapshot
@@ -143,8 +164,8 @@ export const stockReportsController = {
           openingStock,
           closingStock: {}, // Will be updated at end of week
           totalValue,
-          notes
-        }
+          notes,
+        },
       });
 
       res.status(201).json(report);
@@ -160,7 +181,7 @@ export const stockReportsController = {
       const { notes } = req.body;
 
       const report = await prisma.weeklyStockReport.findUnique({
-        where: { id }
+        where: { id },
       });
 
       if (!report) {
@@ -172,25 +193,22 @@ export const stockReportsController = {
         select: {
           id: true,
           currentStock: true,
-          costPrice: true
-        }
+          costPrice: true,
+        },
       });
 
       const closingStock = {};
-      let totalValue = 0;
 
       products.forEach(product => {
         closingStock[product.id] = product.currentStock;
-        totalValue += parseFloat(product.currentStock) * parseFloat(product.costPrice);
       });
 
       const updatedReport = await prisma.weeklyStockReport.update({
         where: { id },
         data: {
           closingStock,
-          totalValue,
-          notes: notes || report.notes
-        }
+          notes: notes || report.notes,
+        },
       });
 
       res.json(updatedReport);
@@ -208,8 +226,8 @@ export const stockReportsController = {
 
       let report = await prisma.weeklyStockReport.findUnique({
         where: {
-          weekNumber_year: { weekNumber, year }
-        }
+          weekNumber_year: { weekNumber, year },
+        },
       });
 
       // If no report exists, create one
@@ -226,8 +244,8 @@ export const stockReportsController = {
           select: {
             id: true,
             currentStock: true,
-            costPrice: true
-          }
+            costPrice: true,
+          },
         });
 
         const openingStock = {};
@@ -246,12 +264,38 @@ export const stockReportsController = {
             endDate: endOfWeek,
             openingStock,
             closingStock: {},
-            totalValue
-          }
+            totalValue,
+          },
         });
       }
 
-      res.json(report);
+      // Get additional stock for this week
+      const additionalStock = await prisma.additionalStock.findMany({
+        where: {
+          weekNumber: report.weekNumber,
+          year: report.year,
+        },
+        include: {
+          product: {
+            select: {
+              itemName: true,
+              category: true,
+            },
+          },
+        },
+        orderBy: { purchaseDate: 'desc' },
+      });
+
+      const additionalStockValue = additionalStock.reduce(
+        (sum, stock) => sum + parseFloat(stock.totalCost),
+        0,
+      );
+
+      res.json({
+        ...report,
+        additionalStock,
+        additionalStockValue,
+      });
     } catch (error) {
       next(error);
     }
@@ -263,7 +307,7 @@ export const stockReportsController = {
       const { id } = req.params;
 
       const report = await prisma.weeklyStockReport.findUnique({
-        where: { id }
+        where: { id },
       });
 
       if (!report) {
@@ -273,7 +317,7 @@ export const stockReportsController = {
       // Get product details
       const productIds = Object.keys(report.openingStock);
       const products = await prisma.product.findMany({
-        where: { id: { in: productIds } }
+        where: { id: { in: productIds } },
       });
 
       // Calculate variances
@@ -289,13 +333,13 @@ export const stockReportsController = {
           opening,
           closing,
           variance,
-          varianceValue
+          varianceValue,
         };
       });
 
       res.json({
         report,
-        variances: variances.sort((a, b) => Math.abs(b.variance) - Math.abs(a.variance))
+        variances: variances.sort((a, b) => Math.abs(b.variance) - Math.abs(a.variance)),
       });
     } catch (error) {
       next(error);
@@ -310,31 +354,31 @@ export const stockReportsController = {
       const additionalStock = await prisma.additionalStock.findMany({
         where: {
           weekNumber: parseInt(weekNumber),
-          year: parseInt(year)
+          year: parseInt(year),
         },
         include: {
           product: {
             select: {
               itemName: true,
-              category: true
-            }
-          }
+              category: true,
+            },
+          },
         },
-        orderBy: { purchaseDate: 'desc' }
+        orderBy: { purchaseDate: 'desc' },
       });
 
       const totalCost = additionalStock.reduce(
         (sum, stock) => sum + parseFloat(stock.totalCost),
-        0
+        0,
       );
 
       res.json({
         additionalStock,
         totalCost,
-        totalItems: additionalStock.length
+        totalItems: additionalStock.length,
       });
     } catch (error) {
       next(error);
     }
-  }
+  },
 };
