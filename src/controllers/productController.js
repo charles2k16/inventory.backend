@@ -1,4 +1,6 @@
 import { PrismaClient } from '@prisma/client';
+import XLSX from 'xlsx';
+import fs from 'fs';
 
 const prisma = new PrismaClient();
 
@@ -191,19 +193,139 @@ export const productController = {
   },
 
   // Bulk import products
+  // Bulk import from JSON or file
   async bulkImport(req, res, next) {
     try {
-      const { products } = req.body;
+      let products = [];
+
+      // If file is uploaded
+      if (req.file) {
+        const filePath = req.file.path;
+        const fileExt = req.file.originalname.split('.').pop().toLowerCase();
+
+        try {
+          if (fileExt === 'csv') {
+            // Parse CSV file
+            products = parseCSV(filePath);
+          } else if (['xlsx', 'xls'].includes(fileExt)) {
+            // Parse Excel file
+            products = parseExcel(filePath);
+          } else {
+            return res.status(400).json({
+              error: 'Invalid file format. Please upload CSV or Excel file',
+            });
+          }
+
+          // Clean up temp file
+          fs.unlinkSync(filePath);
+        } catch (parseError) {
+          if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+          }
+          return res.status(400).json({
+            error: 'Failed to parse file: ' + parseError.message,
+          });
+        }
+      } else if (req.body.products) {
+        // If products sent as JSON
+        products = req.body.products;
+      } else {
+        return res.status(400).json({
+          error: 'No file or products data provided',
+        });
+      }
+
+      // Validate and clean product data
+      const cleanedProducts = products
+        .map(product => ({
+          itemName: product.itemName || product['Item Name'] || '',
+          itemDescription: product.itemDescription || product['Item Description'] || '',
+          category: product.category || product['Category'] || '',
+          barcodeNumber: product.barcodeNumber || product['Barcode'] || '',
+          costPrice: parseFloat(product.costPrice || product['Cost Price'] || 0),
+          sellingPrice: parseFloat(product.sellingPrice || product['Selling Price'] || 0),
+          currentStock: parseInt(product.currentStock || product['Current Stock'] || 0),
+          reorderLevel: parseInt(product.reorderLevel || product['Reorder Level'] || 10),
+        }))
+        .filter(p => p.itemName); // Filter out empty names
+
+      if (cleanedProducts.length === 0) {
+        return res.status(400).json({
+          error: 'No valid products found in the file',
+        });
+      }
 
       const result = await prisma.product.createMany({
-        data: products,
+        data: cleanedProducts,
         skipDuplicates: true,
       });
 
       res.status(201).json({
         message: `${result.count} products imported successfully`,
         count: result.count,
+        total: cleanedProducts.length,
+        skipped: cleanedProducts.length - result.count,
       });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Get import template
+  async getImportTemplate(req, res, next) {
+    try {
+      const template = [
+        {
+          'Item Name': 'Hammer',
+          'Item Description': 'Steel hammer tool',
+          Category: 'Tools',
+          Barcode: 'BAR001',
+          'Cost Price': 50,
+          'Selling Price': 75,
+          'Current Stock': 10,
+          'Reorder Level': 5,
+        },
+        {
+          'Item Name': 'Saw',
+          'Item Description': 'Hand saw',
+          Category: 'Tools',
+          Barcode: 'BAR002',
+          'Cost Price': 100,
+          'Selling Price': 150,
+          'Current Stock': 5,
+          'Reorder Level': 3,
+        },
+      ];
+
+      // Create Excel workbook
+      const ws = XLSX.utils.json_to_sheet(template);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Products');
+
+      // Set column widths
+      ws['!cols'] = [
+        { wch: 20 },
+        { wch: 30 },
+        { wch: 15 },
+        { wch: 15 },
+        { wch: 12 },
+        { wch: 12 },
+        { wch: 15 },
+        { wch: 15 },
+      ];
+
+      // Generate buffer
+      const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'buffer' });
+
+      res.setHeader(
+        'Content-Disposition',
+        'attachment; filename="product_import_template.xlsx"',
+      );
+      res.setHeader(
+        'Content-Type',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      );
+      res.send(buf);
     } catch (error) {
       next(error);
     }
@@ -268,3 +390,46 @@ export const productController = {
     }
   },
 };
+
+// Helper function to parse CSV file
+function parseCSV(filePath) {
+  const fileContent = fs.readFileSync(filePath, 'utf8');
+  const lines = fileContent.trim().split('\n');
+
+  if (lines.length < 2) {
+    throw new Error('CSV file is empty');
+  }
+
+  const headers = lines[0].split(',').map(h => h.trim());
+  const products = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const values = lines[i].split(',').map(v => v.trim());
+    const product = {};
+
+    headers.forEach((header, index) => {
+      product[header] = values[index] || '';
+    });
+
+    if (product[headers[0]]) {
+      // Only add if first column (name) has value
+      products.push(product);
+    }
+  }
+
+  return products;
+}
+
+// Helper function to parse Excel file
+function parseExcel(filePath) {
+  const workbook = XLSX.readFile(filePath);
+  const sheetName = workbook.SheetNames[0];
+  const worksheet = workbook.Sheets[sheetName];
+  const products = XLSX.utils.sheet_to_json(worksheet);
+
+  if (!Array.isArray(products) || products.length === 0) {
+    throw new Error('No data found in Excel file');
+  }
+
+  return products;
+}
