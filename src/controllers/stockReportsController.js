@@ -381,4 +381,195 @@ export const stockReportsController = {
       next(error);
     }
   },
+
+  // Create additional stock record
+  async createAdditionalStock(req, res, next) {
+    try {
+      const {
+        productId,
+        quantity,
+        costPerUnit,
+        supplier,
+        invoiceNumber,
+        notes,
+        purchaseDate,
+      } = req.body;
+
+      // Validate required fields
+      if (!productId || !quantity || !costPerUnit) {
+        return res.status(400).json({
+          message: 'Product, quantity, and cost per unit are required',
+        });
+      }
+
+      // Check if product exists
+      const product = await prisma.product.findUnique({
+        where: { id: productId },
+      });
+
+      if (!product) {
+        return res.status(404).json({ message: 'Product not found' });
+      }
+
+      // Calculate totals
+      const totalCost = parseFloat(quantity) * parseFloat(costPerUnit);
+      const purchase = new Date(purchaseDate || new Date());
+      const weekNumber = getWeekNumber(purchase);
+      const year = purchase.getFullYear();
+
+      // Generate unique batch number
+      const batchNumber = `BATCH-${Date.now()}`;
+
+      // Create additional stock record in transaction
+      const result = await prisma.$transaction(async tx => {
+        // Record the additional stock
+        const additionalStock = await tx.additionalStock.create({
+          data: {
+            batchNumber,
+            productId,
+            quantity: parseInt(quantity),
+            costPerUnit: parseFloat(costPerUnit),
+            totalCost,
+            supplier: supplier || null,
+            invoiceNumber: invoiceNumber || null,
+            weekNumber,
+            year,
+            notes: notes || null,
+            purchaseDate: purchase,
+          },
+          include: {
+            product: {
+              select: {
+                itemName: true,
+                category: true,
+              },
+            },
+          },
+        });
+
+        // Update product stock
+        await tx.product.update({
+          where: { id: productId },
+          data: {
+            currentStock: {
+              increment: parseInt(quantity),
+            },
+          },
+        });
+
+        // Record stock movement
+        const product = await tx.product.findUnique({
+          where: { id: productId },
+        });
+
+        await tx.stockMovement.create({
+          data: {
+            productId,
+            type: 'IN',
+            quantity: parseInt(quantity),
+            reason: 'PURCHASE',
+            reference: additionalStock.id,
+            createdBy: req.user.id,
+            quantityBefore: product.currentStock - parseInt(quantity),
+            quantityAfter: product.currentStock,
+          },
+        });
+
+        return additionalStock;
+      });
+
+      res.status(201).json({
+        message: 'Additional stock recorded successfully',
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Update additional stock record
+  async updateAdditionalStock(req, res, next) {
+    try {
+      const { id } = req.params;
+      const { quantity, costPerUnit, supplier, invoiceNumber, notes } = req.body;
+
+      // Find existing record
+      const existing = await prisma.additionalStock.findUnique({
+        where: { id },
+      });
+
+      if (!existing) {
+        return res.status(404).json({ message: 'Additional stock record not found' });
+      }
+
+      const newTotalCost =
+        parseFloat(quantity || existing.quantity) *
+        parseFloat(costPerUnit || existing.costPerUnit);
+
+      const updated = await prisma.additionalStock.update({
+        where: { id },
+        data: {
+          quantity: quantity ? parseInt(quantity) : existing.quantity,
+          costPerUnit: costPerUnit ? parseFloat(costPerUnit) : existing.costPerUnit,
+          totalCost: newTotalCost,
+          supplier: supplier !== undefined ? supplier : existing.supplier,
+          invoiceNumber:
+            invoiceNumber !== undefined ? invoiceNumber : existing.invoiceNumber,
+          notes: notes !== undefined ? notes : existing.notes,
+        },
+        include: {
+          product: {
+            select: {
+              itemName: true,
+              category: true,
+            },
+          },
+        },
+      });
+
+      res.json({
+        message: 'Additional stock updated successfully',
+        data: updated,
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Delete additional stock record
+  async deleteAdditionalStock(req, res, next) {
+    try {
+      const { id } = req.params;
+
+      const existing = await prisma.additionalStock.findUnique({
+        where: { id },
+      });
+
+      if (!existing) {
+        return res.status(404).json({ message: 'Additional stock record not found' });
+      }
+
+      // Delete in transaction to update stock and movements
+      await prisma.$transaction(async tx => {
+        // Update product stock back
+        await tx.product.update({
+          where: { id: existing.productId },
+          data: {
+            currentStock: {
+              decrement: existing.quantity,
+            },
+          },
+        });
+
+        // Delete the additional stock record
+        await tx.additionalStock.delete({
+          where: { id },
+        });
+      });
+
+      res.json({ message: 'Additional stock record deleted successfully' });
+    } catch (error) {
+      next(error);
+    }
+  },
 };

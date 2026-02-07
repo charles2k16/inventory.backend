@@ -237,21 +237,50 @@ export const productController = {
 
       // Validate and clean product data
       const cleanedProducts = products
-        .map(product => ({
-          itemName: product.itemName || product['Item Name'] || '',
-          itemDescription: product.itemDescription || product['Item Description'] || '',
-          category: product.category || product['Category'] || '',
-          barcodeNumber: product.barcodeNumber || product['Barcode'] || '',
-          costPrice: parseFloat(product.costPrice || product['Cost Price'] || 0),
-          sellingPrice: parseFloat(product.sellingPrice || product['Selling Price'] || 0),
-          currentStock: parseInt(product.currentStock || product['Current Stock'] || 0),
-          reorderLevel: parseInt(product.reorderLevel || product['Reorder Level'] || 10),
-        }))
-        .filter(p => p.itemName); // Filter out empty names
+        .map((product, idx) => {
+          const itemName = product.itemName || product['Item Name'] || '';
+          const sellingPrice = parseFloat(
+            product.sellingPrice || product['Selling Price'] || 0,
+          );
+          const costPrice = parseFloat(product.costPrice || product['Cost Price'] || 0);
+          const currentStock = parseInt(
+            product.currentStock || product['Current Stock'] || 0,
+          );
+
+          // Validation: require itemName and sellingPrice
+          if (!itemName || itemName.trim() === '') {
+            console.warn(`Row ${idx + 2}: Missing item name, skipping`);
+            return null;
+          }
+          if (!sellingPrice || isNaN(sellingPrice) || sellingPrice <= 0) {
+            console.warn(
+              `Row ${idx + 2}: Missing or invalid selling price for "${itemName}", skipping`,
+            );
+            return null;
+          }
+
+          return {
+            itemName: itemName.trim(),
+            itemDescription: product.itemDescription || product['Item Description'] || '',
+            category: product.category || product['Category'] || 'Equipment',
+            barcodeNumber: product.barcodeNumber || product['Barcode'] || '',
+            costPrice: isNaN(costPrice) || costPrice < 0 ? 0 : costPrice,
+            sellingPrice: sellingPrice,
+            currentStock: isNaN(currentStock) || currentStock < 0 ? 0 : currentStock,
+            reorderLevel: parseInt(
+              product.reorderLevel || product['Reorder Level'] || 10,
+            ),
+            type: 'Product',
+            units: 'Product',
+            locationName: 'Diaso',
+          };
+        })
+        .filter(p => p !== null); // Filter out invalid rows
 
       if (cleanedProducts.length === 0) {
         return res.status(400).json({
-          error: 'No valid products found in the file',
+          error:
+            'No valid products found in the file. Ensure each product has a name and selling price.',
         });
       }
 
