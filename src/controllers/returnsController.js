@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { logActivity, getClientIp } from '../utils/activityLogger.js';
 
 const prisma = new PrismaClient();
 
@@ -13,7 +14,12 @@ export const returnsController = {
       if (startDate || endDate) {
         where.returnDate = {};
         if (startDate) where.returnDate.gte = new Date(startDate);
-        if (endDate) where.returnDate.lte = new Date(endDate);
+        if (endDate) {
+          // Add 1 day to endDate to make it inclusive of the entire day
+          const end = new Date(endDate);
+          end.setDate(end.getDate() + 1);
+          where.returnDate.lte = end;
+        }
       }
 
       const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -26,10 +32,10 @@ export const returnsController = {
           orderBy: { returnDate: 'desc' },
           include: {
             product: true,
-            sale: true
-          }
+            sale: true,
+          },
         }),
-        prisma.return.count({ where })
+        prisma.return.count({ where }),
       ]);
 
       res.json({
@@ -38,8 +44,8 @@ export const returnsController = {
           total,
           page: parseInt(page),
           limit: parseInt(limit),
-          pages: Math.ceil(total / parseInt(limit))
-        }
+          pages: Math.ceil(total / parseInt(limit)),
+        },
       });
     } catch (error) {
       next(error);
@@ -49,19 +55,12 @@ export const returnsController = {
   // Create return
   async createReturn(req, res, next) {
     try {
-      const {
-        saleId,
-        productId,
-        quantity,
-        reason,
-        refundAmount,
-        refundMethod,
-        notes
-      } = req.body;
+      const { saleId, productId, quantity, reason, refundAmount, refundMethod, notes } =
+        req.body;
 
       const returnNumber = `RET-${Date.now()}`;
 
-      const result = await prisma.$transaction(async (tx) => {
+      const result = await prisma.$transaction(async tx => {
         // Create return
         const returnRecord = await tx.return.create({
           data: {
@@ -74,20 +73,20 @@ export const returnsController = {
             refundMethod,
             status: 'PENDING',
             returnedBy: req.user.id,
-            notes
+            notes,
           },
           include: {
             product: true,
-            sale: true
-          }
+            sale: true,
+          },
         });
 
         // Update product stock (add back)
         await tx.product.update({
           where: { id: productId },
           data: {
-            currentStock: { increment: parseInt(quantity) }
-          }
+            currentStock: { increment: parseInt(quantity) },
+          },
         });
 
         // Record stock movement
@@ -98,11 +97,21 @@ export const returnsController = {
             quantity: parseInt(quantity),
             reason: 'RETURN',
             reference: returnRecord.id,
-            createdBy: req.user.id
-          }
+            createdBy: req.user.id,
+          },
         });
 
         return returnRecord;
+      });
+
+      // Log activity
+      await logActivity({
+        userId: req.user.id,
+        action: 'CREATE',
+        resourceType: 'RETURN',
+        resourceId: result.id,
+        description: `Created return: ${result.returnNumber} for ${result.quantity} units with reason: ${result.reason}`,
+        ipAddress: getClientIp(req),
       });
 
       res.status(201).json(result);
@@ -118,7 +127,7 @@ export const returnsController = {
 
       const returnRecord = await prisma.return.update({
         where: { id },
-        data: { status: 'APPROVED' }
+        data: { status: 'APPROVED' },
       });
 
       res.json(returnRecord);
@@ -134,12 +143,12 @@ export const returnsController = {
 
       const returnRecord = await prisma.return.update({
         where: { id },
-        data: { status: 'COMPLETED' }
+        data: { status: 'COMPLETED' },
       });
 
       res.json(returnRecord);
     } catch (error) {
       next(error);
     }
-  }
+  },
 };

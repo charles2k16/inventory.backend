@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { logActivity, getClientIp } from '../utils/activityLogger.js';
 
 const prisma = new PrismaClient();
 
@@ -166,6 +167,16 @@ export const stockReportsController = {
           totalValue,
           notes,
         },
+      });
+
+      // Log activity
+      await logActivity({
+        userId: req.user.id,
+        action: 'CREATE',
+        resourceType: 'STOCK_REPORT',
+        resourceId: report.id,
+        description: `Created weekly stock report for week ${weekNumber} of year ${year}`,
+        ipAddress: getClientIp(req),
       });
 
       res.status(201).json(report);

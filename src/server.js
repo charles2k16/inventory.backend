@@ -12,6 +12,7 @@ import lendersRoutes from './routes/lenders.js';
 import stockReportsRoutes from './routes/stockReports.js';
 import dashboardRoutes from './routes/dashboard.js';
 import authRoutes from './routes/auth.js';
+import activityRoutes from './routes/activity.js';
 
 // Import middleware
 import { errorHandler } from './middleware/errorHandler.js';
@@ -23,10 +24,12 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middleware
-app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS?.split(',') || 'http://localhost:3000',
-  credentials: true
-}));
+app.use(
+  cors({
+    origin: process.env.ALLOWED_ORIGINS?.split(',') || 'http://localhost:3000',
+    credentials: true,
+  }),
+);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('dev'));
@@ -45,6 +48,7 @@ app.use('/api/returns', authMiddleware, returnsRoutes);
 app.use('/api/lenders', authMiddleware, lendersRoutes);
 app.use('/api/stock-reports', authMiddleware, stockReportsRoutes);
 app.use('/api/dashboard', authMiddleware, dashboardRoutes);
+app.use('/api/activity', authMiddleware, activityRoutes);
 
 // Error handling
 app.use(errorHandler);

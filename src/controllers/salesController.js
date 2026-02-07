@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { logActivity, getClientIp } from '../utils/activityLogger.js';
 
 const prisma = new PrismaClient();
 
@@ -13,7 +14,12 @@ export const salesController = {
       if (startDate || endDate) {
         where.saleDate = {};
         if (startDate) where.saleDate.gte = new Date(startDate);
-        if (endDate) where.saleDate.lte = new Date(endDate);
+        if (endDate) {
+          // Add 1 day to endDate to make it inclusive of the entire day
+          const end = new Date(endDate);
+          end.setDate(end.getDate() + 1);
+          where.saleDate.lte = end;
+        }
       }
 
       if (status) where.paymentStatus = status;
@@ -158,6 +164,16 @@ export const salesController = {
         }
 
         return sale;
+      });
+
+      // Log activity
+      await logActivity({
+        userId: req.user.id,
+        action: 'CREATE',
+        resourceType: 'SALE',
+        resourceId: result.id,
+        description: `Created sale: ${result.saleNumber} for ${result.customerName || 'Unknown'} with ${result.quantity} units`,
+        ipAddress: getClientIp(req),
       });
 
       res.status(201).json(result);
@@ -336,6 +352,16 @@ export const salesController = {
         sales: result,
         totalSalesCreated: result.length,
       });
+
+      // Log activity
+      await logActivity({
+        userId: req.user.id,
+        action: 'BULK_CREATE',
+        resourceType: 'SALE',
+        resourceId: orderNumber,
+        description: `Created bulk sale with order number ${orderNumber} containing ${result.length} items`,
+        ipAddress: getClientIp(req),
+      });
     } catch (error) {
       next(error);
     }
@@ -350,10 +376,15 @@ export const salesController = {
       if (startDate || endDate) {
         where.saleDate = {};
         if (startDate) where.saleDate.gte = new Date(startDate);
-        if (endDate) where.saleDate.lte = new Date(endDate);
+        if (endDate) {
+          // Add 1 day to endDate to make it inclusive of the entire day
+          const end = new Date(endDate);
+          end.setDate(end.getDate() + 1);
+          where.saleDate.lte = end;
+        }
       }
 
-      const [totalSales, totalRevenue, pendingPayments] = await Promise.all([
+      const [totalSales, totalRevenue, pendingPayments, salesData] = await Promise.all([
         prisma.sale.count({ where }),
         prisma.sale.aggregate({
           where,
@@ -366,11 +397,19 @@ export const salesController = {
           },
           _sum: { amountDue: true },
         }),
+        prisma.sale.findMany({
+          where,
+          select: { quantity: true },
+        }),
       ]);
+
+      // Calculate total items sold
+      const totalItems = salesData.reduce((sum, sale) => sum + (sale.quantity || 0), 0);
 
       res.json({
         totalSales,
         totalRevenue: totalRevenue._sum.totalAmount || 0,
+        totalItems,
         pendingPayments: pendingPayments._sum.amountDue || 0,
       });
     } catch (error) {

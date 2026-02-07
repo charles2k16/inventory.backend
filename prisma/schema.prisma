@@ -50,6 +50,7 @@ model StockMovement {
   reference      String? // Reference to sale/return ID
   notes          String?
   createdBy      String?
+  createdByUser  User?    @relation(fields: [createdBy], references: [id], onDelete: SetNull)
   createdAt      DateTime @default(now())
 
   @@index([productId])
@@ -197,16 +198,18 @@ model Payment {
 
 // Users/Staff
 model User {
-  id        String   @id @default(uuid())
-  username  String   @unique
-  email     String   @unique
-  password  String
-  firstName String
-  lastName  String
-  role      String   @default("STAFF") // "ADMIN", "MANAGER", "STAFF"
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id             String          @id @default(uuid())
+  username       String          @unique
+  email          String          @unique
+  password       String
+  firstName      String
+  lastName       String
+  role           String          @default("STAFF") // "ADMIN", "MANAGER", "STAFF"
+  isActive       Boolean         @default(true)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  stockMovements StockMovement[]
+  activityLogs   ActivityLog[]
 
   @@index([username])
   @@index([email])
@@ -219,4 +222,23 @@ model Setting {
   value     String
   category  String?
   updatedAt DateTime @updatedAt
+}
+
+// Activity Log - Audit trail for all user activities
+model ActivityLog {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  action       String // "CREATE", "UPDATE", "DELETE", "LOGIN", "BULK_IMPORT", etc.
+  resourceType String // "PRODUCT", "SALE", "RETURN", "STOCK_REPORT", "LENDER", "CUSTOMER", etc.
+  resourceId   String? // ID of the affected resource
+  description  String // Human-readable description of the action
+  changes      Json? // Optional: { before: {...}, after: {...} } for edit operations
+  ipAddress    String? // Client IP for security tracking
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([resourceType])
+  @@index([createdAt])
 }

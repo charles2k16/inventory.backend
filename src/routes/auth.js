@@ -2,6 +2,7 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
+import { logActivity, getClientIp } from '../utils/activityLogger.js';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -12,7 +13,7 @@ router.post('/login', async (req, res, next) => {
     const { username, password } = req.body;
 
     const user = await prisma.user.findUnique({
-      where: { username }
+      where: { username },
     });
 
     if (!user || !user.isActive) {
@@ -21,14 +22,33 @@ router.post('/login', async (req, res, next) => {
 
     const isValid = await bcrypt.compare(password, user.password);
     if (!isValid) {
+      // Log failed login attempt
+      await logActivity({
+        userId: user.id,
+        action: 'LOGIN_FAILED',
+        resourceType: 'USER',
+        resourceId: user.id,
+        description: `Failed login attempt for user ${username}`,
+        ipAddress: getClientIp(req),
+      });
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     const token = jwt.sign(
       { id: user.id, username: user.username, role: user.role },
       process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' },
     );
+
+    // Log successful login
+    await logActivity({
+      userId: user.id,
+      action: 'LOGIN',
+      resourceType: 'USER',
+      resourceId: user.id,
+      description: `User ${username} logged in`,
+      ipAddress: getClientIp(req),
+    });
 
     res.json({
       token,
@@ -38,8 +58,8 @@ router.post('/login', async (req, res, next) => {
         email: user.email,
         firstName: user.firstName,
         lastName: user.lastName,
-        role: user.role
-      }
+        role: user.role,
+      },
     });
   } catch (error) {
     next(error);
@@ -60,7 +80,7 @@ router.post('/register', async (req, res, next) => {
         password: hashedPassword,
         firstName,
         lastName,
-        role: role || 'STAFF'
+        role: role || 'STAFF',
       },
       select: {
         id: true,
@@ -68,8 +88,8 @@ router.post('/register', async (req, res, next) => {
         email: true,
         firstName: true,
         lastName: true,
-        role: true
-      }
+        role: true,
+      },
     });
 
     res.status(201).json(user);

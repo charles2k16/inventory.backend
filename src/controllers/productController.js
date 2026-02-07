@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import XLSX from 'xlsx';
 import fs from 'fs';
+import { logActivity, getClientIp } from '../utils/activityLogger.js';
 
 const prisma = new PrismaClient();
 
@@ -72,6 +73,16 @@ export const productController = {
         where: { id },
         include: {
           stockMovements: {
+            include: {
+              createdByUser: {
+                select: {
+                  id: true,
+                  username: true,
+                  firstName: true,
+                  lastName: true,
+                },
+              },
+            },
             orderBy: { createdAt: 'desc' },
             take: 20,
           },
@@ -107,6 +118,16 @@ export const productController = {
         data: req.body,
       });
 
+      // Log activity
+      await logActivity({
+        userId: req.user.id,
+        action: 'CREATE',
+        resourceType: 'PRODUCT',
+        resourceId: product.id,
+        description: `Created product: ${product.itemName}`,
+        ipAddress: getClientIp(req),
+      });
+
       // Create initial stock movement record if stock > 0
       if (product.currentStock > 0) {
         await prisma.stockMovement.create({
@@ -118,7 +139,7 @@ export const productController = {
             quantityAfter: product.currentStock,
             reason: 'PURCHASE',
             notes: 'Initial stock entry',
-            createdBy: req.user?.username || 'System',
+            createdBy: req.user.id,
           },
         });
       }
@@ -134,9 +155,27 @@ export const productController = {
     try {
       const { id } = req.params;
 
+      const oldProduct = await prisma.product.findUnique({
+        where: { id },
+      });
+
       const product = await prisma.product.update({
         where: { id },
         data: req.body,
+      });
+
+      // Log activity with changes
+      await logActivity({
+        userId: req.user.id,
+        action: 'UPDATE',
+        resourceType: 'PRODUCT',
+        resourceId: product.id,
+        description: `Updated product: ${product.itemName}`,
+        changes: {
+          before: oldProduct,
+          after: product,
+        },
+        ipAddress: getClientIp(req),
       });
 
       res.json(product);
@@ -150,8 +189,22 @@ export const productController = {
     try {
       const { id } = req.params;
 
+      const product = await prisma.product.findUnique({
+        where: { id },
+      });
+
       await prisma.product.delete({
         where: { id },
+      });
+
+      // Log activity
+      await logActivity({
+        userId: req.user.id,
+        action: 'DELETE',
+        resourceType: 'PRODUCT',
+        resourceId: id,
+        description: `Deleted product: ${product?.itemName}`,
+        ipAddress: getClientIp(req),
       });
 
       res.json({ message: 'Product deleted successfully' });
@@ -406,8 +459,18 @@ export const productController = {
           quantityAfter: newStock,
           reason: reason || null,
           notes: notes || null,
-          createdBy: req.user?.username || 'System',
+          createdBy: req.user?.id || null,
         },
+      });
+
+      // Log activity
+      await logActivity({
+        userId: req.user.id,
+        action: 'UPDATE',
+        resourceType: 'STOCK',
+        resourceId: id,
+        description: `Updated stock for ${product.itemName}: ${type === 'IN' ? '+' : '-'}${quantity} units (${reason || 'ADJUSTMENT'})`,
+        ipAddress: getClientIp(req),
       });
 
       res.json({

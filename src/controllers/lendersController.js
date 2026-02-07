@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { logActivity, getClientIp } from '../utils/activityLogger.js';
 
 const prisma = new PrismaClient();
 
@@ -14,7 +15,7 @@ export const lendersController = {
         where.OR = [
           { name: { contains: search, mode: 'insensitive' } },
           { phone: { contains: search, mode: 'insensitive' } },
-          { customerCode: { contains: search, mode: 'insensitive' } }
+          { customerCode: { contains: search, mode: 'insensitive' } },
         ];
       }
 
@@ -28,11 +29,11 @@ export const lendersController = {
           orderBy: { name: 'asc' },
           include: {
             _count: {
-              select: { sales: true, payments: true }
-            }
-          }
+              select: { sales: true, payments: true },
+            },
+          },
         }),
-        prisma.lender.count({ where })
+        prisma.lender.count({ where }),
       ]);
 
       res.json({
@@ -41,8 +42,8 @@ export const lendersController = {
           total,
           page: parseInt(page),
           limit: parseInt(limit),
-          pages: Math.ceil(total / parseInt(limit))
-        }
+          pages: Math.ceil(total / parseInt(limit)),
+        },
       });
     } catch (error) {
       next(error);
@@ -60,13 +61,13 @@ export const lendersController = {
           sales: {
             orderBy: { saleDate: 'desc' },
             take: 20,
-            include: { product: true }
+            include: { product: true },
           },
           payments: {
             orderBy: { paymentDate: 'desc' },
-            take: 20
-          }
-        }
+            take: 20,
+          },
+        },
       });
 
       if (!lender) {
@@ -86,7 +87,7 @@ export const lendersController = {
 
       // Generate customer code
       const lastLender = await prisma.lender.findFirst({
-        orderBy: { createdAt: 'desc' }
+        orderBy: { createdAt: 'desc' },
       });
       const customerCode = `CUST-${(lastLender ? parseInt(lastLender.customerCode.split('-')[1]) + 1 : 1).toString().padStart(5, '0')}`;
 
@@ -98,8 +99,18 @@ export const lendersController = {
           email,
           address,
           creditLimit: creditLimit || 0,
-          notes
-        }
+          notes,
+        },
+      });
+
+      // Log activity
+      await logActivity({
+        userId: req.user.id,
+        action: 'CREATE',
+        resourceType: 'LENDER',
+        resourceId: lender.id,
+        description: `Created lender/customer: ${lender.name} (${lender.customerCode})`,
+        ipAddress: getClientIp(req),
       });
 
       res.status(201).json(lender);
@@ -113,9 +124,27 @@ export const lendersController = {
     try {
       const { id } = req.params;
 
+      const oldLender = await prisma.lender.findUnique({
+        where: { id },
+      });
+
       const lender = await prisma.lender.update({
         where: { id },
-        data: req.body
+        data: req.body,
+      });
+
+      // Log activity
+      await logActivity({
+        userId: req.user.id,
+        action: 'UPDATE',
+        resourceType: 'LENDER',
+        resourceId: lender.id,
+        description: `Updated lender/customer: ${lender.name}`,
+        changes: {
+          before: oldLender,
+          after: lender,
+        },
+        ipAddress: getClientIp(req),
       });
 
       res.json(lender);
@@ -132,7 +161,7 @@ export const lendersController = {
 
       const paymentNumber = `PAY-${Date.now()}`;
 
-      const result = await prisma.$transaction(async (tx) => {
+      const result = await prisma.$transaction(async tx => {
         // Create payment
         const payment = await tx.payment.create({
           data: {
@@ -142,8 +171,8 @@ export const lendersController = {
             paymentMethod,
             reference,
             notes,
-            receivedBy: req.user.id
-          }
+            receivedBy: req.user.id,
+          },
         });
 
         // Update lender debt
@@ -151,8 +180,8 @@ export const lendersController = {
           where: { id },
           data: {
             currentDebt: { decrement: parseFloat(amount) },
-            totalPaid: { increment: parseFloat(amount) }
-          }
+            totalPaid: { increment: parseFloat(amount) },
+          },
         });
 
         return payment;
@@ -169,9 +198,9 @@ export const lendersController = {
     try {
       const lenders = await prisma.lender.findMany({
         where: {
-          currentDebt: { gt: 0 }
+          currentDebt: { gt: 0 },
         },
-        orderBy: { currentDebt: 'desc' }
+        orderBy: { currentDebt: 'desc' },
       });
 
       const totalDebt = lenders.reduce((sum, l) => sum + parseFloat(l.currentDebt), 0);
@@ -190,12 +219,12 @@ export const lendersController = {
 
       const lender = await prisma.lender.update({
         where: { id },
-        data: { status }
+        data: { status },
       });
 
       res.json(lender);
     } catch (error) {
       next(error);
     }
-  }
+  },
 };
