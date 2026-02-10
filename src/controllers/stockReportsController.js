@@ -325,32 +325,54 @@ export const stockReportsController = {
         return res.status(404).json({ error: 'Report not found' });
       }
 
-      // Get product details
-      const productIds = Object.keys(report.openingStock);
-      const products = await prisma.product.findMany({
-        where: { id: { in: productIds } },
+      // Calculate closing stock value (cost value of remaining stock)
+      const productIds = Object.keys(report.closingStock || {});
+
+      let closingStockValue = 0;
+      if (productIds.length > 0) {
+        const products = await prisma.product.findMany({
+          where: { id: { in: productIds } },
+          select: {
+            id: true,
+            costPrice: true,
+          },
+        });
+
+        products.forEach(product => {
+          const closingQty = report.closingStock[product.id] || 0;
+          closingStockValue +=
+            parseFloat(closingQty || 0) * parseFloat(product.costPrice || 0);
+        });
+      }
+
+      const openingStockValue = parseFloat(report.totalValue || 0);
+
+      // Get additional stock value for the same week/year
+      const additionalStock = await prisma.additionalStock.findMany({
+        where: {
+          weekNumber: report.weekNumber,
+          year: report.year,
+        },
+        select: {
+          totalCost: true,
+        },
       });
 
-      // Calculate variances
-      const variances = products.map(product => {
-        const opening = report.openingStock[product.id] || 0;
-        const closing = report.closingStock[product.id] || 0;
-        const variance = closing - opening;
-        const varianceValue = variance * parseFloat(product.costPrice);
+      const additionalStockValue = additionalStock.reduce(
+        (sum, stock) => sum + parseFloat(stock.totalCost || 0),
+        0,
+      );
 
-        return {
-          productId: product.id,
-          productName: product.itemName,
-          opening,
-          closing,
-          variance,
-          varianceValue,
-        };
-      });
+      // Goods sold at cost (opening minus closing, same as in Inventory Movement Summary)
+      const goodsSoldValue = openingStockValue - closingStockValue;
 
       res.json({
-        report,
-        variances: variances.sort((a, b) => Math.abs(b.variance) - Math.abs(a.variance)),
+        weekNumber: report.weekNumber,
+        year: report.year,
+        openingStockValue,
+        closingStockValue,
+        goodsSoldValue,
+        additionalStockValue,
       });
     } catch (error) {
       next(error);
