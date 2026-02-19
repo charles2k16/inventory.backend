@@ -3,6 +3,8 @@ import express from 'express';
 import multer from 'multer';
 import path from 'path';
 import { productController } from '../controllers/productController.js';
+import { roleMiddleware } from '../middleware/auth.js';
+import { CAN_MANAGE_PRODUCTS } from '../constants/roles.js';
 
 const router = express.Router();
 
@@ -41,10 +43,10 @@ router.get('/categories', productController.getCategories);
 router.get('/low-stock', productController.getLowStockProducts);
 router.get('/import/template', productController.getImportTemplate);
 router.get('/:id', productController.getProduct);
-router.post('/', productController.createProduct);
-router.post('/bulk-import', upload.single('file'), productController.bulkImport);
-router.patch('/:id/update-stock', productController.updateStock);
-router.put('/:id', productController.updateProduct);
-router.delete('/:id', productController.deleteProduct);
+router.post('/', roleMiddleware(CAN_MANAGE_PRODUCTS), productController.createProduct);
+router.post('/bulk-import', roleMiddleware(CAN_MANAGE_PRODUCTS), upload.single('file'), productController.bulkImport);
+router.patch('/:id/update-stock', roleMiddleware(CAN_MANAGE_PRODUCTS), productController.updateStock);
+router.put('/:id', roleMiddleware(CAN_MANAGE_PRODUCTS), productController.updateProduct);
+router.delete('/:id', roleMiddleware(CAN_MANAGE_PRODUCTS), productController.deleteProduct);
 
 export default router;

@@ -1,9 +1,10 @@
 import jwt from 'jsonwebtoken';
+import { normalizeRole } from '../constants/roles.js';
 
 export const authMiddleware = (req, res, next) => {
   try {
     const token = req.headers.authorization?.split(' ')[1]; // Bearer TOKEN
-    
+
     if (!token) {
       return res.status(401).json({ error: 'No token provided' });
     }
@@ -18,7 +19,8 @@ export const authMiddleware = (req, res, next) => {
 
 export const roleMiddleware = (roles = []) => {
   return (req, res, next) => {
-    if (!roles.includes(req.user.role)) {
+    const role = normalizeRole(req.user?.role);
+    if (!roles.includes(role)) {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
     next();

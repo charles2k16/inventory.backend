@@ -1,5 +1,7 @@
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
+import { roleMiddleware } from '../middleware/auth.js';
+import { CAN_MANAGE_STOCK } from '../constants/roles.js';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -79,8 +81,8 @@ router.get('/movements', async (req, res, next) => {
   }
 });
 
-// Add additional stock
-router.post('/additional-stock', async (req, res, next) => {
+// Add additional stock (Manager+ only)
+router.post('/additional-stock', roleMiddleware(CAN_MANAGE_STOCK), async (req, res, next) => {
   try {
     const {
       productId,
