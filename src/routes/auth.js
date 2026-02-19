@@ -3,6 +3,8 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
 import { logActivity, getClientIp } from '../utils/activityLogger.js';
+import { authMiddleware, roleMiddleware } from '../middleware/auth.js';
+import { CAN_VIEW_ACTIVITY } from '../constants/roles.js';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -66,8 +68,8 @@ router.post('/login', async (req, res, next) => {
   }
 });
 
-// Register (admin only in production)
-router.post('/register', async (req, res, next) => {
+// Register (admin only)
+router.post('/register', authMiddleware, roleMiddleware(CAN_VIEW_ACTIVITY), async (req, res, next) => {
   try {
     const { username, email, password, firstName, lastName, role } = req.body;
 
@@ -80,7 +82,7 @@ router.post('/register', async (req, res, next) => {
         password: hashedPassword,
         firstName,
         lastName,
-        role: role || 'STAFF',
+        role: role || 'SALES',
       },
       select: {
         id: true,
@@ -89,7 +91,18 @@ router.post('/register', async (req, res, next) => {
         firstName: true,
         lastName: true,
         role: true,
+        isActive: true,
+        createdAt: true,
       },
+    });
+
+    await logActivity({
+      userId: req.user.id,
+      action: 'CREATE',
+      resourceType: 'USER',
+      resourceId: user.id,
+      description: `Admin created user ${user.username} (${user.role})`,
+      ipAddress: getClientIp(req),
     });
 
     res.status(201).json(user);

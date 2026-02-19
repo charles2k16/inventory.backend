@@ -12,6 +12,7 @@ import lendersRoutes from './routes/lenders.js';
 import stockReportsRoutes from './routes/stockReports.js';
 import dashboardRoutes from './routes/dashboard.js';
 import authRoutes from './routes/auth.js';
+import usersRoutes from './routes/users.js';
 import activityRoutes from './routes/activity.js';
 
 // Import middleware
@@ -41,6 +42,7 @@ app.get('/health', (req, res) => {
 
 // Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/users', authMiddleware, usersRoutes);
 app.use('/api/products', authMiddleware, productRoutes);
 app.use('/api/inventory', authMiddleware, inventoryRoutes);
 app.use('/api/sales', authMiddleware, salesRoutes);
