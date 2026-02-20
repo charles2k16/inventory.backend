@@ -2,6 +2,11 @@ import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import fs from 'fs';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Import routes
 import productRoutes from './routes/products.js';
@@ -52,10 +57,24 @@ app.use('/api/stock-reports', authMiddleware, stockReportsRoutes);
 app.use('/api/dashboard', authMiddleware, dashboardRoutes);
 app.use('/api/activity', authMiddleware, activityRoutes);
 
+// Serve frontend static files (when built into backend/public for single-app deploy)
+const publicDir = path.join(__dirname, '..', 'public');
+const indexPath = path.join(publicDir, 'index.html');
+if (fs.existsSync(publicDir) && fs.existsSync(indexPath)) {
+  app.use(express.static(publicDir));
+  // SPA fallback: only for page routes – don't send HTML for asset requests (.json, .js, .css, etc.)
+  // so _payload.json and other static files get proper 404 when missing instead of HTML
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path === '/health') return next();
+    if (/\.(json|js|css|ico|png|jpg|jpeg|gif|svg|woff2?|ttf|eot)$/i.test(req.path)) return next();
+    res.sendFile(indexPath);
+  });
+}
+
 // Error handling
 app.use(errorHandler);
 
-// 404 handler
+// 404 handler (API routes only; frontend gets index.html via fallback above)
 app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
