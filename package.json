@@ -5,6 +5,7 @@
   "main": "src/server.js",
   "type": "module",
   "scripts": {
+    "ci": "npm ci --include=dev",
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
     "prisma:generate": "prisma generate",
